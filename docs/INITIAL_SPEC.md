@@ -1,29 +1,33 @@
-# Initial Spec — Generic Restic Backup PowerShell Tool
+# Initial Spec - Restic Batch Backup
 
 ## 1. Purpose
 
-This project contains a generic PowerShell-based backup helper for running Restic backups from Windows devices to any Restic-supported repository backend.
+This project contains a generic, config-driven Restic helper for backing up a batch of configured folders to any Restic-supported repository backend.
 
-The script should not contain machine-specific repository paths, hostnames, usernames, password file names, backup folders, exclude rules, retention settings, or restore defaults. Those values belong in an external configuration file.
+Version 1 is Windows-first and uses a PowerShell runner. The project structure and configuration format should already leave room for future Linux support through a Bash runner.
 
-The script centralizes the common backup workflow:
+The runner should not contain machine-specific repository paths, hostnames, usernames, password file names, backup folders, exclude rules, retention settings, or restore defaults. Those setup-specific values belong in an external JSON configuration file.
+
+The runner centralizes the common backup workflow:
 
 - loading and validating configuration
 - setting Restic environment variables
 - validating local prerequisites
+- backing up a configured list of folders
+- applying configured exclude rules
 - running common Restic commands
-- reporting useful status and errors
+- reporting useful status, duration, and errors
 
 Deployment-specific values are stored in:
 
 ```text
-config.ps1
+config.json
 ```
 
 An example configuration is committed as:
 
 ```text
-config.example.ps1
+config.example.json
 ```
 
 ---
@@ -37,12 +41,12 @@ The tool should work with any Restic repository URL supported by Restic, includi
 - REST server repositories
 - cloud backends supported by Restic
 
-SFTP-over-SSH is a common deployment option, but the script must treat it as a repository string supplied by configuration rather than a hard-coded assumption.
+SFTP-over-SSH is a common deployment option, but the runner must treat it as a repository string supplied by configuration rather than a hard-coded assumption.
 
-Example SFTP repository value:
+Example SFTP repository value in JSON:
 
-```powershell
-$Repository = "sftp:backup-restic-example:/mnt/backups/automated/restic/example-device"
+```json
+"repository": "sftp:backup-restic-example:/mnt/backups/automated/restic/example-device"
 ```
 
 Example SSH client configuration for an SFTP deployment:
@@ -66,19 +70,19 @@ Match Group backup-sftp
     AllowAgentForwarding no
 ```
 
-Infrastructure setup is outside the script. The script only needs a valid Restic repository URL and any credentials required by that backend.
+Infrastructure setup is outside the runner. The runner only needs a valid Restic repository URL and any credentials required by that backend.
 
 ---
 
 ## 3. Project Goals
 
-The script should support these actions:
+The runner should support these actions:
 
 ```text
-init        Initialize the Restic repository
+init        Initialize the configured Restic repository
 backup      Back up all configured folders
 snapshots   List available snapshots
-status      Show useful repository status
+status      Show useful repository and configuration status
 restore     Restore a snapshot to a chosen folder
 check       Check repository integrity
 forget      Apply retention policy and prune old data
@@ -93,15 +97,15 @@ backup
 Example usage:
 
 ```powershell
-.\restic-backup.ps1 -Action init
-.\restic-backup.ps1 -Action backup
-.\restic-backup.ps1 -Action backup -DryRun
-.\restic-backup.ps1 -Action backup -ConfigPath .\configs\laptop.ps1
-.\restic-backup.ps1 -Action snapshots
-.\restic-backup.ps1 -Action status
-.\restic-backup.ps1 -Action check
-.\restic-backup.ps1 -Action restore -Snapshot latest -RestoreTarget C:\Temp\restic-restore
-.\restic-backup.ps1 -Action forget
+.\runners\restic-batch-backup.ps1 -Action init
+.\runners\restic-batch-backup.ps1 -Action backup
+.\runners\restic-batch-backup.ps1 -Action backup -DryRun
+.\runners\restic-batch-backup.ps1 -Action backup -ConfigPath .\configs\laptop.json
+.\runners\restic-batch-backup.ps1 -Action snapshots
+.\runners\restic-batch-backup.ps1 -Action status
+.\runners\restic-batch-backup.ps1 -Action check
+.\runners\restic-batch-backup.ps1 -Action restore -Snapshot latest -RestoreTarget C:\Temp\restic-restore
+.\runners\restic-batch-backup.ps1 -Action forget
 ```
 
 ---
@@ -111,23 +115,35 @@ Example usage:
 Recommended structure:
 
 ```text
-restic-backup
+restic-batch-backup
 ├── README.md
-├── restic-backup.ps1
-├── config.example.ps1
+├── config.example.json
 ├── .gitignore
+├── runners
+│   └── restic-batch-backup.ps1
 └── docs
     ├── INITIAL_SPEC.md
     └── setup-notes.md
 ```
 
+Local runtime files:
+
+```text
+restic-batch-backup
+├── config.json
+└── logs
+```
+
 Optional later:
 
 ```text
-restic-backup
+restic-batch-backup
+├── configs
 ├── logs
 ├── tests
-└── scripts
+├── scripts
+└── runners
+    └── restic-batch-backup.sh
 ```
 
 Logs should normally not be committed to Git.
@@ -136,115 +152,112 @@ Logs should normally not be committed to Git.
 
 ## 5. Configuration Files
 
-Configuration must live outside the main script.
+Configuration must live outside the runner code and use JSON so future runners can share the same config contract.
 
-### `config.ps1`
+### `config.json`
 
-`config.ps1` contains real machine-specific values and must not be committed to Git.
+`config.json` contains real machine-specific values and must not be committed to Git.
 
-The script should load it by default from the project root:
-
-```powershell
-.\config.ps1
-```
-
-The script should also accept a custom config path so the same code can be reused for multiple devices or backup profiles:
+The PowerShell runner should load it by default from the project root:
 
 ```powershell
-.\restic-backup.ps1 -ConfigPath .\configs\desktop.ps1
-.\restic-backup.ps1 -ConfigPath .\configs\photos.ps1
+.\config.json
 ```
 
-### `config.example.ps1`
+The runner should also accept a custom config path so the same code can be reused for multiple devices or backup profiles:
 
-`config.example.ps1` documents the required settings with placeholder values. A user creates their own `config.ps1` by copying the example and editing the values.
+```powershell
+.\runners\restic-batch-backup.ps1 -ConfigPath .\configs\desktop.json
+.\runners\restic-batch-backup.ps1 -ConfigPath .\configs\photos.json
+```
+
+### `config.example.json`
+
+`config.example.json` documents the required settings with placeholder values. A user creates their own `config.json` by copying the example and editing the values.
 
 Example:
 
-```powershell
-# Required: logical name shown in output and logs.
-$BackupName = "example-device"
-
-# Required: any Restic-supported repository URL.
-$Repository = "sftp:backup-restic-example:/mnt/backups/automated/restic/example-device"
-
-# Required: path to the local Restic password file.
-$PasswordFile = "$env:USERPROFILE\.restic\restic-password-example-device.txt"
-
-# Required: folders to back up.
-$BackupFolders = @(
-    "$env:USERPROFILE\Documents",
-    "$env:USERPROFILE\Desktop",
-    "$env:USERPROFILE\Pictures"
-)
-
-# Optional: Restic exclude rules.
-$ExcludeItems = @(
-    "$env:USERPROFILE\.restic",
-    "node_modules",
-    ".cache",
-    "bin",
-    "obj"
-)
-
-# Required: retention policy for forget/prune.
-$KeepDaily = 14
-$KeepWeekly = 8
-$KeepMonthly = 12
-
-# Required: default restore location.
-$DefaultRestoreTarget = "C:\Temp\restic-restore"
-
-# Optional: log location.
-$LogFolder = "$env:USERPROFILE\.restic\logs"
-
-# Optional: extra tags added to backups.
-$BackupTags = @(
-    $BackupName
-)
+```json
+{
+    "name": "example-device",
+    "repository": "sftp:backup-restic-example:/mnt/backups/automated/restic/example-device",
+    "passwordFile": "%USERPROFILE%\\.restic\\restic-password-example-device.txt",
+    "backupFolders": [
+        "%USERPROFILE%\\Documents",
+        "%USERPROFILE%\\Desktop",
+        "%USERPROFILE%\\Pictures"
+    ],
+    "excludeItems": [
+        "%USERPROFILE%\\.restic",
+        "node_modules",
+        ".cache",
+        "bin",
+        "obj"
+    ],
+    "retention": {
+        "keepDaily": 14,
+        "keepWeekly": 8,
+        "keepMonthly": 12
+    },
+    "restore": {
+        "defaultTarget": "C:\\Temp\\restic-restore"
+    },
+    "logging": {
+        "folder": "%USERPROFILE%\\.restic\\logs"
+    },
+    "backupTags": [
+        "example-device"
+    ]
+}
 ```
 
 ### Loaded values
 
-The script should dot-source the selected config file and validate that required values exist before running any Restic command.
+The runner should read the selected JSON config file, parse it with a structured JSON parser, and validate that required values exist before running any Restic command.
 
 Required config values:
 
-- `$BackupName`
-- `$Repository`
-- `$PasswordFile`
-- `$BackupFolders`
-- `$KeepDaily`
-- `$KeepWeekly`
-- `$KeepMonthly`
-- `$DefaultRestoreTarget`
+- `name`
+- `repository`
+- `passwordFile`
+- `backupFolders`
+- `retention.keepDaily`
+- `retention.keepWeekly`
+- `retention.keepMonthly`
+- `restore.defaultTarget`
 
 Optional config values:
 
-- `$ExcludeItems`
-- `$LogFolder`
-- `$BackupTags`
+- `excludeItems`
+- `logging.folder`
+- `backupTags`
 
-After loading configuration, the script should set:
+After loading configuration, the runner should set:
 
 ```powershell
-$env:RESTIC_PASSWORD_FILE = $PasswordFile
+$env:RESTIC_PASSWORD_FILE = $Config.passwordFile
 ```
 
-The script must never print or store the password itself.
+The actual password file must not be stored in Git. The runner must never print or store the password itself.
+
+### Path and environment expansion
+
+The v1 PowerShell runner should expand Windows-style environment variables in JSON string values, such as `%USERPROFILE%`.
+
+Linux support is future work. The JSON format should remain portable, but individual config files may contain operating-system-specific paths.
 
 ---
 
 ## 6. Command-Line Parameters
 
-The script should accept:
+The PowerShell runner should accept:
 
 ```powershell
 param(
     [ValidateSet("init", "backup", "snapshots", "status", "restore", "check", "forget")]
     [string]$Action = "backup",
 
-    [string]$ConfigPath = ".\config.ps1",
+    [string]$ConfigPath = "$PSScriptRoot\..\config.json",
 
     [string]$Snapshot = "latest",
 
@@ -254,7 +267,7 @@ param(
 )
 ```
 
-If `-RestoreTarget` is omitted, the script should use `$DefaultRestoreTarget` from the loaded config.
+If `-RestoreTarget` is omitted, the runner should use `restore.defaultTarget` from the loaded config.
 
 ---
 
@@ -262,10 +275,10 @@ If `-RestoreTarget` is omitted, the script should use `$DefaultRestoreTarget` fr
 
 ### init
 
-Initializes the Restic repository.
+Initializes the configured Restic repository.
 
 ```powershell
-restic -r $Repository init
+restic -r $Config.repository init
 ```
 
 Expected behavior:
@@ -283,7 +296,7 @@ Backs up all configured folders.
 Command pattern:
 
 ```powershell
-restic -r $Repository backup <folders> --exclude <items> --tag <tags>
+restic -r $Config.repository backup <folders> --exclude <items> --tag <tags>
 ```
 
 Expected behavior:
@@ -291,15 +304,17 @@ Expected behavior:
 - Load and validate the selected config file.
 - Validate that Restic exists.
 - Validate that the password file exists.
+- Expand configured paths and environment variables.
 - Skip missing backup folders with a warning.
 - Stop if no valid folders remain.
 - Support `-DryRun`.
-- Add configured tags when `$BackupTags` is set.
+- Add configured tags when `backupTags` is set.
+- Measure and print the backup duration when the command finishes.
 
 Dry run pattern:
 
 ```powershell
-restic -r $Repository backup <folders> --dry-run
+restic -r $Config.repository backup <folders> --exclude <items> --dry-run
 ```
 
 ---
@@ -309,7 +324,7 @@ restic -r $Repository backup <folders> --dry-run
 Lists available snapshots.
 
 ```powershell
-restic -r $Repository snapshots
+restic -r $Config.repository snapshots
 ```
 
 ---
@@ -321,13 +336,13 @@ Shows practical repository information.
 Minimum output:
 
 ```powershell
-restic -r $Repository snapshots
-restic -r $Repository stats latest
+restic -r $Config.repository snapshots
+restic -r $Config.repository stats latest
 ```
 
-The script should also print:
+The runner should also print:
 
-- backup name
+- config name
 - config path
 - repository URL
 - configured backup folders
@@ -342,22 +357,22 @@ The script should also print:
 Restores a selected snapshot.
 
 ```powershell
-restic -r $Repository restore $Snapshot --target $RestoreTarget
+restic -r $Config.repository restore $Snapshot --target $EffectiveRestoreTarget
 ```
 
 Examples:
 
 ```powershell
-.\restic-backup.ps1 -Action restore -Snapshot latest -RestoreTarget C:\Temp\restic-restore
-.\restic-backup.ps1 -Action restore -Snapshot abc12345 -RestoreTarget D:\Restore
+.\runners\restic-batch-backup.ps1 -Action restore -Snapshot latest
+.\runners\restic-batch-backup.ps1 -Action restore -Snapshot abc12345 -RestoreTarget D:\Restore
 ```
 
 Expected behavior:
 
+- Use the configured default restore target when `-RestoreTarget` is omitted.
 - Create restore target if it does not exist.
 - Never restore directly over configured backup folders by default.
 - Warn clearly before restore.
-- Use `$DefaultRestoreTarget` from config when `-RestoreTarget` is omitted.
 
 ---
 
@@ -366,13 +381,13 @@ Expected behavior:
 Checks repository integrity.
 
 ```powershell
-restic -r $Repository check
+restic -r $Config.repository check
 ```
 
 Later optional heavier check:
 
 ```powershell
-restic -r $Repository check --read-data-subset=5%
+restic -r $Config.repository check --read-data-subset=5%
 ```
 
 ---
@@ -382,7 +397,7 @@ restic -r $Repository check --read-data-subset=5%
 Applies retention policy and prunes old data.
 
 ```powershell
-restic -r $Repository forget --keep-daily $KeepDaily --keep-weekly $KeepWeekly --keep-monthly $KeepMonthly --prune
+restic -r $Config.repository forget --keep-daily $Config.retention.keepDaily --keep-weekly $Config.retention.keepWeekly --keep-monthly $Config.retention.keepMonthly --prune
 ```
 
 Expected behavior:
@@ -394,7 +409,7 @@ Expected behavior:
 
 ## 8. Safety Requirements
 
-The script should be safe and boring.
+The runner should be safe and boring.
 
 ### Must do
 
@@ -413,7 +428,9 @@ The script should be safe and boring.
 
 - Use clear console output.
 - Show the action being executed.
+- Show the config file being used.
 - Show start and end time.
+- Show backup duration for the `backup` action.
 - Show Restic exit code.
 - Make it easy to run from Windows Task Scheduler.
 
@@ -421,27 +438,28 @@ The script should be safe and boring.
 
 ## 9. Logging
 
-The script should eventually log to `$LogFolder` from config. If `$LogFolder` is omitted, it should default to:
+The runner should eventually log to `logging.folder` from config. If `logging.folder` is omitted, it should default to:
 
-```powershell
-$LogFolder = "$env:USERPROFILE\.restic\logs"
+```text
+%USERPROFILE%\.restic\logs
 ```
 
 Example log file:
 
 ```text
-restic-backup-YYYY-MM-DD.log
+restic-batch-backup-YYYY-MM-DD.log
 ```
 
 Logged information:
 
 - timestamp
 - action
-- backup name
+- config name
 - config path
 - repository URL
 - backup folders
 - warnings
+- backup duration for backup runs
 - Restic command result
 - exit code
 
@@ -449,6 +467,7 @@ Logs should not contain:
 
 - Restic password
 - private SSH key content
+- access tokens
 
 ---
 
@@ -459,10 +478,13 @@ The repository should not contain secrets or runtime files.
 `.gitignore` should include:
 
 ```gitignore
+# Local configuration
+config.json
+configs/*.json
+!config.example.json
+!configs/*.example.json
+
 # Secrets
-config.ps1
-configs/*.ps1
-!config.example.ps1
 *.key
 *.pem
 *password*
@@ -498,10 +520,14 @@ The SSH public key may be committed only if there is a clear reason, but normall
 Possible future features:
 
 - Multiple named backup profiles.
+- Linux support with a Bash runner at `runners/restic-batch-backup.sh`.
+- Shared JSON config schema used by both PowerShell and Bash runners.
+- Cross-platform path and environment variable expansion.
 - Config schema validation with clearer diagnostics.
+- GitHub Release packaging and checksums.
+- Optional install/update helper script.
 - Windows Task Scheduler setup helper.
 - Notification on failed backup.
-- Backup duration reporting.
 - Repository size reporting.
 - Automatic `forget` after successful backup.
 - Weekly `check`.
@@ -516,8 +542,11 @@ Possible future features:
 Version 1 should implement:
 
 ```text
+PowerShell runner at runners/restic-batch-backup.ps1
+JSON config loading and validation
 init
 backup
+backup duration reporting
 snapshots
 status
 restore
@@ -525,6 +554,8 @@ check
 forget
 ```
 
+Version 1 does not need to implement the Linux Bash runner, but the file layout and JSON config contract should avoid blocking it.
+
 Keep the first version simple.
 
-The main goal is to have a working, readable, maintainable backup script that can be safely run manually and later scheduled. The implementation should be reusable across devices by changing configuration, not by editing the script.
+The main goal is to have a working, readable, maintainable backup runner that can safely back up a configured batch of folders. The implementation should be reusable across devices by changing configuration, not by editing runner code.
