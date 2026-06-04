@@ -104,6 +104,7 @@ Example usage:
 .\runners\restic-batch-backup.ps1 -Action snapshots
 .\runners\restic-batch-backup.ps1 -Action status
 .\runners\restic-batch-backup.ps1 -Action check
+.\runners\restic-batch-backup.ps1 -Action restore -Snapshot latest -DryRun
 .\runners\restic-batch-backup.ps1 -Action restore -Snapshot latest -RestoreTarget C:\Temp\restic-restore
 .\runners\restic-batch-backup.ps1 -Action forget
 ```
@@ -263,11 +264,15 @@ param(
 
     [string]$RestoreTarget,
 
+    [switch]$AllowNonEmptyRestoreTarget,
+
     [switch]$DryRun
 )
 ```
 
 If `-RestoreTarget` is omitted, the runner should use `restore.defaultTarget` from the loaded config.
+
+`-DryRun` should apply to `backup` and `restore`.
 
 ---
 
@@ -354,25 +359,32 @@ The runner should also print:
 
 ### restore
 
-Restores a selected snapshot.
+Restores the configured backup folders from a selected snapshot.
 
 ```powershell
-restic -r $Config.repository restore $Snapshot --target $EffectiveRestoreTarget
+restic -r $Config.repository restore "$Snapshot:<restic-folder-path>" --target "$EffectiveRestoreTarget\<folder-name>"
 ```
 
 Examples:
 
 ```powershell
 .\runners\restic-batch-backup.ps1 -Action restore -Snapshot latest
+.\runners\restic-batch-backup.ps1 -Action restore -Snapshot latest -DryRun
 .\runners\restic-batch-backup.ps1 -Action restore -Snapshot abc12345 -RestoreTarget D:\Restore
 ```
 
 Expected behavior:
 
 - Use the configured default restore target when `-RestoreTarget` is omitted.
-- Create restore target if it does not exist.
+- Convert each configured backup folder to the matching Restic snapshot path. For example, `C:\Users\Example\Documents` becomes `/C/Users/Example/Documents`.
+- Restore each configured backup folder into a subfolder below the restore target.
+- Create restore target if it does not exist, except during restore dry-runs.
+- Refuse non-empty restore targets unless `-AllowNonEmptyRestoreTarget` is passed.
 - Never restore directly over configured backup folders by default.
+- Support `-DryRun`.
 - Warn clearly before restore.
+
+Windows note: restoring a whole snapshot can require Restic to restore metadata for ancestor folders such as `C:\Users`. Some Windows metadata and security descriptor operations require Administrator privileges. The default configured-folder restore path should avoid restoring those ancestor folders.
 
 ---
 
@@ -421,6 +433,7 @@ The runner should be safe and boring.
 - Never print the Restic password.
 - Never delete local files.
 - Never restore over configured backup folders by default.
+- Never restore into a non-empty target by default.
 - Use readable error messages.
 - Return a non-zero exit code when a Restic command fails.
 

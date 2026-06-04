@@ -1,0 +1,22 @@
+# Local configuration
+config.json
+configs/*.json
+!config.example.json
+!configs/*.example.json
+
+# Secrets
+*.key
+*.pem
+*password*
+*.secret
+
+# Restic local runtime
+logs/
+*.log
+
+# PowerShell/editor temp
+*.tmp
+*.bak
+
+# VS Code local settings if needed
+.vscode/
