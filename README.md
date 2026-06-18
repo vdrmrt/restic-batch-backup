@@ -2,7 +2,7 @@
 
 Restic Batch Backup is a small, config-driven helper for backing up a batch of configured folders with Restic.
 
-Version 1 is Windows-first and uses a PowerShell runner. The repository already uses JSON configuration and a `runners/` folder so a future Linux Bash runner can share the same config shape.
+The project is still Windows-first, and now includes both a PowerShell runner for Windows and an initial Bash runner for Linux. Both runners use the same JSON config shape, while real config values remain operating-system specific.
 
 ## What It Does
 
@@ -16,8 +16,17 @@ Version 1 is Windows-first and uses a PowerShell runner. The repository already 
 
 ## Requirements
 
-- Windows PowerShell 5.1 or newer.
+Windows:
+
+- PowerShell 5.1 or newer.
 - Restic installed and available on `PATH`.
+- A reachable Restic repository.
+- A local Restic password file.
+
+Linux:
+
+- Bash 4.0 or newer.
+- `jq`, `realpath`, and Restic installed and available on `PATH`.
 - A reachable Restic repository.
 - A local Restic password file.
 
@@ -77,6 +86,15 @@ Use a different config file:
 .\runners\restic-batch-backup.ps1 -Action backup -ConfigPath .\configs\laptop.json
 ```
 
+Linux runner examples:
+
+```bash
+./runners/restic-batch-backup.sh status --config ./config.json
+./runners/restic-batch-backup.sh backup --dry-run --config ./config.json
+./runners/restic-batch-backup.sh restore --snapshot latest --dry-run --config ./config.json
+./runners/restic-batch-backup.sh forget --config ./config.json
+```
+
 ## Configuration
 
 Real local configuration belongs in `config.json`, which is ignored by Git. The committed `config.example.json` documents the schema.
@@ -129,6 +147,10 @@ Start in: C:\Path\To\restic-batch-backup
 - Restore targets must be empty unless `-AllowNonEmptyRestoreTarget` is passed.
 - Restic failures return non-zero exit codes.
 
-## Future Linux Support
+## Linux Support
 
-Linux support is planned as a future Bash runner at `runners/restic-batch-backup.sh`. The JSON configuration format is intended to be shared by both runners.
+An initial Linux Bash runner is available at `runners/restic-batch-backup.sh`.
+
+Linux configs should use Linux paths and Linux-style environment variables such as `$HOME`. The detailed Linux design and behavior notes live in `docs/LINUX_SUPPORT_SPEC.md`.
+
+On Linux, `restore --dry-run` is implemented as a preview mode. The runner still validates restore target safety, but it lists the snapshot contents with `restic ls` instead of writing files because current Restic versions do not provide a native restore dry-run flag.
