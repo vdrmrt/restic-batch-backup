@@ -27,6 +27,7 @@ restic-batch-backup
 │   ├── linux-sftp-test.example.json
 │   └── windows-sftp-backup.example.json
 ├── docs/
+│   ├── INSTALLING_A_RELEASE.md
 │   ├── SFTP_SERVER_SETUP.md
 │   ├── SFTP_TESTING.md
 │   └── RELEASING.md
@@ -60,6 +61,8 @@ Linux:
 - a local Restic password file
 
 ## Quick Start
+
+If you are installing from a GitHub release instead of working from a clone, start with `docs/INSTALLING_A_RELEASE.md`.
 
 Windows example:
 
@@ -191,6 +194,7 @@ The test data helper supports:
 
 - `VERSION` stores the current target release version
 - `CHANGELOG.md` tracks unreleased and released changes
+- `docs/INSTALLING_A_RELEASE.md` explains how a user installs a published release
 - `docs/RELEASING.md` documents the release checklist
 - GitHub Actions runs CI smoke checks for both runners
 - GitHub releases are created from `vX.Y.Z` tags when the tag matches `VERSION` and `CHANGELOG.md`

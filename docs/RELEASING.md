@@ -74,6 +74,8 @@ The release workflow enforces two checks:
 - the pushed tag must match `VERSION`
 - `CHANGELOG.md` must contain a dated section for that exact version
 
+The current release workflow publishes the repository contents as a GitHub release. Users should install from that release archive using `docs/INSTALLING_A_RELEASE.md`.
+
 ## After Releasing
 
 Prepare the next development cycle:
