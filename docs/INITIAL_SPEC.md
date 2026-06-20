@@ -18,16 +18,16 @@ The runner centralizes the common backup workflow:
 - running common Restic commands
 - reporting useful status, duration, and errors
 
-Deployment-specific values are stored in:
+Deployment-specific values are stored in an external user config file, for example:
 
 ```text
-config.json
+%APPDATA%\restic-batch-backup\config.json
 ```
 
-An example configuration is committed as:
+Example configurations are committed under:
 
 ```text
-config.example.json
+config_examples/
 ```
 
 ---
@@ -100,7 +100,7 @@ Example usage:
 .\runners\restic-batch-backup.ps1 -Action init
 .\runners\restic-batch-backup.ps1 -Action backup
 .\runners\restic-batch-backup.ps1 -Action backup -DryRun
-.\runners\restic-batch-backup.ps1 -Action backup -ConfigPath .\configs\laptop.json
+.\runners\restic-batch-backup.ps1 -Action backup -ConfigPath "$env:APPDATA\restic-batch-backup\laptop.json"
 .\runners\restic-batch-backup.ps1 -Action snapshots
 .\runners\restic-batch-backup.ps1 -Action status
 .\runners\restic-batch-backup.ps1 -Action check
@@ -118,7 +118,8 @@ Recommended structure:
 ```text
 restic-batch-backup
 ├── README.md
-├── config.example.json
+├── config_examples
+│   └── windows-sftp-backup.example.json
 ├── .gitignore
 ├── runners
 │   └── restic-batch-backup.ps1
@@ -130,7 +131,7 @@ restic-batch-backup
 Local runtime files:
 
 ```text
-restic-batch-backup
+%APPDATA%\restic-batch-backup
 ├── config.json
 └── logs
 ```
@@ -138,13 +139,11 @@ restic-batch-backup
 Optional later:
 
 ```text
-restic-batch-backup
-├── configs
-├── logs
-├── tests
-├── scripts
-└── runners
-    └── restic-batch-backup.sh
+%APPDATA%\restic-batch-backup
+├── config.json
+├── desktop.json
+├── photos.json
+└── logs
 ```
 
 Logs should normally not be committed to Git.
@@ -155,26 +154,26 @@ Logs should normally not be committed to Git.
 
 Configuration must live outside the runner code and use JSON so future runners can share the same config contract.
 
-### `config.json`
+### Default live config file
 
-`config.json` contains real machine-specific values and must not be committed to Git.
+The live config file contains real machine-specific values and must not be committed to Git.
 
-The PowerShell runner should load it by default from the project root:
+The PowerShell runner should load it by default from the user profile config area:
 
 ```powershell
-.\config.json
+$env:APPDATA\restic-batch-backup\config.json
 ```
 
 The runner should also accept a custom config path so the same code can be reused for multiple devices or backup profiles:
 
 ```powershell
-.\runners\restic-batch-backup.ps1 -ConfigPath .\configs\desktop.json
-.\runners\restic-batch-backup.ps1 -ConfigPath .\configs\photos.json
+.\runners\restic-batch-backup.ps1 -ConfigPath "$env:APPDATA\restic-batch-backup\desktop.json"
+.\runners\restic-batch-backup.ps1 -ConfigPath "$env:APPDATA\restic-batch-backup\photos.json"
 ```
 
-### `config.example.json`
+### `config_examples/windows-sftp-backup.example.json`
 
-`config.example.json` documents the required settings with placeholder values. A user creates their own `config.json` by copying the example and editing the values.
+`config_examples/windows-sftp-backup.example.json` documents the Windows-oriented SFTP backup settings with placeholder values. A user creates their own live config by copying the example outside the repo and editing the values.
 
 Example:
 
@@ -202,6 +201,9 @@ Example:
     },
     "restore": {
         "defaultTarget": "C:\\Temp\\restic-restore"
+    },
+    "ssh": {
+        "identityFile": "%USERPROFILE%\\.ssh\\id_ed25519_backup_example_device"
     },
     "logging": {
         "folder": "%USERPROFILE%\\.restic\\logs"
@@ -232,6 +234,7 @@ Optional config values:
 - `excludeItems`
 - `logging.folder`
 - `backupTags`
+- `ssh.identityFile`
 
 After loading configuration, the runner should set:
 
@@ -258,7 +261,7 @@ param(
     [ValidateSet("init", "backup", "snapshots", "status", "restore", "check", "forget")]
     [string]$Action = "backup",
 
-    [string]$ConfigPath = "$PSScriptRoot\..\config.json",
+    [string]$ConfigPath = "$env:APPDATA\restic-batch-backup\config.json",
 
     [string]$Snapshot = "latest",
 
@@ -491,12 +494,6 @@ The repository should not contain secrets or runtime files.
 `.gitignore` should include:
 
 ```gitignore
-# Local configuration
-config.json
-configs/*.json
-!config.example.json
-!configs/*.example.json
-
 # Secrets
 *.key
 *.pem

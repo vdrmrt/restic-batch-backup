@@ -3,7 +3,7 @@ param(
     [ValidateSet("init", "backup", "snapshots", "status", "restore", "check", "forget")]
     [string]$Action = "backup",
 
-    [string]$ConfigPath = "$PSScriptRoot\..\config.json",
+    [string]$ConfigPath,
 
     [string]$Snapshot = "latest",
 
@@ -17,6 +17,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ScriptStartTime = Get-Date
 $FinalExitCode = 0
+$script:ResticConnectionArguments = @()
 
 function Write-Info {
     param([Parameter(Mandatory = $true)][string]$Message)
@@ -150,6 +151,19 @@ function Convert-ToConfigPath {
     return [System.IO.Path]::GetFullPath((Join-Path $ConfigDirectory $ExpandedPath))
 }
 
+function Get-DefaultConfigPath {
+    if (-not [string]::IsNullOrWhiteSpace($env:APPDATA)) {
+        return [System.IO.Path]::GetFullPath((Join-Path $env:APPDATA "restic-batch-backup\config.json"))
+    }
+
+    $UserProfilePath = [Environment]::GetFolderPath("UserProfile")
+    if (-not [string]::IsNullOrWhiteSpace($UserProfilePath)) {
+        return [System.IO.Path]::GetFullPath((Join-Path $UserProfilePath ".config\restic-batch-backup\config.json"))
+    }
+
+    throw "No default config directory is available. Pass -ConfigPath explicitly."
+}
+
 function Read-BackupConfig {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -188,16 +202,24 @@ function Read-BackupConfig {
     $ExcludeItems = @(Expand-ConfigStringArray -Value (Get-ConfigProperty -Source $RawConfig -Name "excludeItems"))
     $BackupTags = @(Expand-ConfigStringArray -Value (Get-ConfigProperty -Source $RawConfig -Name "backupTags"))
     $Logging = Get-ConfigProperty -Source $RawConfig -Name "logging"
+    $Ssh = Get-ConfigProperty -Source $RawConfig -Name "ssh"
     $LoggingFolderValue = Expand-ConfigString -Value (Get-ConfigProperty -Source $Logging -Name "folder")
+    $SshIdentityFileValue = Expand-ConfigString -Value (Get-ConfigProperty -Source $Ssh -Name "identityFile")
 
     if ([string]::IsNullOrWhiteSpace($LoggingFolderValue)) {
         $LoggingFolderValue = "%USERPROFILE%\.restic\logs"
+    }
+
+    $SshIdentityFile = $null
+    if (-not [string]::IsNullOrWhiteSpace($SshIdentityFileValue)) {
+        $SshIdentityFile = Convert-ToConfigPath -Path $SshIdentityFileValue -ConfigDirectory $ConfigDirectory
     }
 
     return [pscustomobject]@{
         Name = $Name
         Repository = $Repository
         PasswordFile = $PasswordFile
+        SshIdentityFile = $SshIdentityFile
         BackupFolders = $BackupFolders
         ExcludeItems = $ExcludeItems
         BackupTags = $BackupTags
@@ -222,6 +244,40 @@ function Assert-PasswordFileExists {
     if (-not (Test-Path -LiteralPath $Config.PasswordFile -PathType Leaf)) {
         throw "Restic password file not found: $($Config.PasswordFile)"
     }
+}
+
+function Test-IsSftpRepository {
+    param([string]$Repository)
+
+    if ([string]::IsNullOrWhiteSpace($Repository)) {
+        return $false
+    }
+
+    return $Repository.StartsWith("sftp:", [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Initialize-ResticConnectionArguments {
+    param([Parameter(Mandatory = $true)][object]$Config)
+
+    $script:ResticConnectionArguments = @()
+
+    if ([string]::IsNullOrWhiteSpace($Config.SshIdentityFile)) {
+        return
+    }
+
+    if (-not (Test-IsSftpRepository -Repository $Config.Repository)) {
+        Write-Warning "ssh.identityFile is set but the repository is not an SFTP repository; it will be ignored."
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $Config.SshIdentityFile -PathType Leaf)) {
+        throw "SSH identity file not found: $($Config.SshIdentityFile)"
+    }
+
+    $script:ResticConnectionArguments = @(
+        "-o",
+        "sftp.args=-i $($Config.SshIdentityFile) -o IdentitiesOnly=yes"
+    )
 }
 
 function Format-TimeSpan {
@@ -251,10 +307,11 @@ function Format-ResticArgument {
 function Invoke-ResticCommand {
     param([Parameter(Mandatory = $true)][string[]]$Arguments)
 
-    $DisplayArguments = @($Arguments | ForEach-Object { Format-ResticArgument -Argument $_ }) -join " "
+    $EffectiveArguments = @($script:ResticConnectionArguments + $Arguments)
+    $DisplayArguments = @($EffectiveArguments | ForEach-Object { Format-ResticArgument -Argument $_ }) -join " "
     Write-Info "Running: restic $DisplayArguments"
 
-    & restic @Arguments | ForEach-Object { Write-Host $_ }
+    & restic @EffectiveArguments | ForEach-Object { Write-Host $_ }
 
     if ($null -eq $LASTEXITCODE) {
         $ResticExitCode = 0
@@ -454,6 +511,9 @@ function Show-ConfigSummary {
     Write-Info "Config path: $($Config.ConfigPath)"
     Write-Info "Repository: $($Config.Repository)"
     Write-Info "Password file: $($Config.PasswordFile)"
+    if (-not [string]::IsNullOrWhiteSpace($Config.SshIdentityFile)) {
+        Write-Info "SSH identity file: $($Config.SshIdentityFile)"
+    }
     Write-Info "Log folder: $($Config.LoggingFolder)"
     Write-Info "Retention: daily=$($Config.KeepDaily), weekly=$($Config.KeepWeekly), monthly=$($Config.KeepMonthly)"
 
@@ -624,12 +684,17 @@ function Invoke-ForgetAction {
 }
 
 try {
+    if (-not $PSBoundParameters.ContainsKey("ConfigPath") -or [string]::IsNullOrWhiteSpace($ConfigPath)) {
+        $ConfigPath = Get-DefaultConfigPath
+    }
+
     Write-Section "Restic Batch Backup"
     Write-Info "Action: $Action"
     Write-Info "Start time: $($ScriptStartTime.ToString('yyyy-MM-dd HH:mm:ss'))"
 
     $Config = Read-BackupConfig -Path $ConfigPath
     $env:RESTIC_PASSWORD_FILE = $Config.PasswordFile
+    Initialize-ResticConnectionArguments -Config $Config
 
     Assert-ResticAvailable
     Assert-PasswordFileExists -Config $Config

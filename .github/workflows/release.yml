@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate release metadata
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          version="$(tr -d '\r\n' < VERSION)"
+          tag_version="${TAG_NAME#v}"
+
+          if [[ "$version" != "$tag_version" ]]; then
+            echo "VERSION ($version) does not match tag ($TAG_NAME)." >&2
+            exit 1
+          fi
+
+          awk -v version="$tag_version" '
+            $0 ~ "^## \\[" version "\\] - " {
+              in_section = 1
+              next
+            }
+            in_section && /^## \[/ {
+              exit
+            }
+            in_section {
+              print
+            }
+          ' CHANGELOG.md > release-notes.md
+
+          if [[ ! -s release-notes.md ]]; then
+            echo "No CHANGELOG.md section found for version $tag_version." >&2
+            exit 1
+          fi
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: gh release create "$TAG_NAME" --title "$TAG_NAME" --notes-file release-notes.md --verify-tag

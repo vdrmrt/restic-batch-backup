@@ -1,0 +1,30 @@
+{
+    "name": "sftp-test-device",
+    "repository": "sftp:backup-restic-test:/data/restic/sftp-test-device",
+    "passwordFile": "$HOME/.config/restic/restic-password-sftp-test.txt",
+    "backupFolders": [
+        "/tmp/restic-test"
+    ],
+    "excludeItems": [
+        ".cache",
+        "node_modules"
+    ],
+    "retention": {
+        "keepDaily": 7,
+        "keepWeekly": 4,
+        "keepMonthly": 6
+    },
+    "restore": {
+        "defaultTarget": "/tmp/restic-sftp-restore"
+    },
+    "ssh": {
+        "identityFile": "$HOME/.ssh/id_ed25519_restic_test"
+    },
+    "logging": {
+        "folder": "$HOME/.local/state/restic-batch-backup/logs"
+    },
+    "backupTags": [
+        "sftp-test",
+        "restic-batch-backup"
+    ]
+}

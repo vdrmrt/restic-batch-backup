@@ -1,0 +1,34 @@
+{
+    "name": "example-device",
+    "repository": "sftp:backup-restic-example:/mnt/backups/automated/restic/example-device",
+    "passwordFile": "%USERPROFILE%\\.restic\\restic-password-example-device.txt",
+    "backupFolders": [
+        "%USERPROFILE%\\Documents",
+        "%USERPROFILE%\\Desktop",
+        "%USERPROFILE%\\Pictures"
+    ],
+    "excludeItems": [
+        "%USERPROFILE%\\.restic",
+        "node_modules",
+        ".cache",
+        "bin",
+        "obj"
+    ],
+    "retention": {
+        "keepDaily": 14,
+        "keepWeekly": 8,
+        "keepMonthly": 12
+    },
+    "restore": {
+        "defaultTarget": "C:\\Temp\\restic-restore"
+    },
+    "ssh": {
+        "identityFile": "%USERPROFILE%\\.ssh\\id_ed25519_backup_example_device"
+    },
+    "logging": {
+        "folder": "%USERPROFILE%\\.restic\\logs"
+    },
+    "backupTags": [
+        "example-device"
+    ]
+}

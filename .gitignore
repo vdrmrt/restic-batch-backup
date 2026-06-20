@@ -1,9 +1,3 @@
-# Local configuration
-config.json
-configs/*.json
-!config.example.json
-!configs/*.example.json
-
 # Secrets
 *.key
 *.pem

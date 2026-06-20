@@ -12,7 +12,7 @@ SHOW_FINAL_SUMMARY=true
 FAILURE_REPORTED=false
 
 ACTION="backup"
-CONFIG_PATH="${SCRIPT_DIR}/../config.json"
+CONFIG_PATH=""
 SNAPSHOT="latest"
 RESTORE_TARGET=""
 ALLOW_NON_EMPTY_RESTORE_TARGET=false
@@ -22,6 +22,7 @@ CONFIG_DIRECTORY=""
 CONFIG_NAME=""
 CONFIG_REPOSITORY=""
 CONFIG_PASSWORD_FILE=""
+CONFIG_SSH_IDENTITY_FILE=""
 CONFIG_DEFAULT_RESTORE_TARGET=""
 CONFIG_LOGGING_FOLDER=""
 CONFIG_KEEP_DAILY=0
@@ -32,6 +33,7 @@ declare -a CONFIG_BACKUP_FOLDERS=()
 declare -a CONFIG_EXCLUDE_ITEMS=()
 declare -a CONFIG_BACKUP_TAGS=()
 declare -a VALID_BACKUP_FOLDERS=()
+declare -a RESTIC_CONNECTION_ARGS=()
 
 write_info() {
     printf '[INFO] %s\n' "$1"
@@ -164,6 +166,24 @@ trap finalize_script EXIT
 
 is_blank_string() {
     [[ -z "${1//[[:space:]]/}" ]]
+}
+
+set_default_config_path() {
+    if ! is_blank_string "$CONFIG_PATH"; then
+        return
+    fi
+
+    if [[ -n ${XDG_CONFIG_HOME:-} ]]; then
+        CONFIG_PATH="${XDG_CONFIG_HOME}/restic-batch-backup/config.json"
+        return
+    fi
+
+    if [[ -n ${HOME:-} ]]; then
+        CONFIG_PATH="${HOME}/.config/restic-batch-backup/config.json"
+        return
+    fi
+
+    fail "HOME is not set and no --config path was provided."
 }
 
 assert_bash_version() {
@@ -348,6 +368,7 @@ load_backup_config() {
     local raw_name
     local raw_repository
     local raw_password_file
+    local raw_ssh_identity_file
     local raw_default_restore_target
     local raw_logging_folder
     local raw_item
@@ -384,6 +405,12 @@ load_backup_config() {
     CONFIG_PASSWORD_FILE="$(resolve_config_path_value "$raw_password_file")"
     if is_blank_string "$CONFIG_PASSWORD_FILE"; then
         fail "Missing required config value 'passwordFile'."
+    fi
+
+    CONFIG_SSH_IDENTITY_FILE=""
+    raw_ssh_identity_file="$(read_optional_json_string '.ssh.identityFile')"
+    if ! is_blank_string "$raw_ssh_identity_file"; then
+        CONFIG_SSH_IDENTITY_FILE="$(resolve_config_path_value "$raw_ssh_identity_file")"
     fi
 
     CONFIG_BACKUP_FOLDERS=()
@@ -450,21 +477,45 @@ assert_password_file_exists() {
     fi
 }
 
+is_sftp_repository() {
+    [[ $CONFIG_REPOSITORY == sftp:* ]]
+}
+
+configure_restic_connection() {
+    RESTIC_CONNECTION_ARGS=()
+
+    if is_blank_string "$CONFIG_SSH_IDENTITY_FILE"; then
+        return
+    fi
+
+    if ! is_sftp_repository; then
+        write_warning "ssh.identityFile is set but the repository is not an SFTP repository; it will be ignored."
+        return
+    fi
+
+    if [[ ! -f $CONFIG_SSH_IDENTITY_FILE ]]; then
+        fail "SSH identity file not found: $CONFIG_SSH_IDENTITY_FILE"
+    fi
+
+    RESTIC_CONNECTION_ARGS=(-o "sftp.args=-i $CONFIG_SSH_IDENTITY_FILE -o IdentitiesOnly=yes")
+}
+
 invoke_restic_command() {
     local -a arguments=("$@")
+    local -a effective_arguments=("${RESTIC_CONNECTION_ARGS[@]}" "${arguments[@]}")
     local -a formatted_arguments=()
     local argument
     local formatted_command=""
     local exit_code=0
 
-    for argument in "${arguments[@]}"; do
+    for argument in "${effective_arguments[@]}"; do
         formatted_arguments+=("$(quote_argument "$argument")")
     done
 
     formatted_command="${formatted_arguments[*]}"
     write_info "Running: restic $formatted_command"
 
-    if restic "${arguments[@]}"; then
+    if restic "${effective_arguments[@]}"; then
         exit_code=0
     else
         exit_code=$?
@@ -610,6 +661,9 @@ show_config_summary() {
     write_info "Config path: $CONFIG_PATH"
     write_info "Repository: $CONFIG_REPOSITORY"
     write_info "Password file: $CONFIG_PASSWORD_FILE"
+    if ! is_blank_string "$CONFIG_SSH_IDENTITY_FILE"; then
+        write_info "SSH identity file: $CONFIG_SSH_IDENTITY_FILE"
+    fi
     write_info "Log folder: $CONFIG_LOGGING_FOLDER"
     write_info "Retention: daily=$CONFIG_KEEP_DAILY, weekly=$CONFIG_KEEP_WEEKLY, monthly=$CONFIG_KEEP_MONTHLY"
 
@@ -915,6 +969,7 @@ run_action() {
 main() {
     assert_bash_version
     parse_arguments "$@"
+    set_default_config_path
 
     write_section "Restic Batch Backup"
     write_info "Action: $ACTION"
@@ -924,6 +979,7 @@ main() {
     assert_command_available realpath
     load_backup_config
     export RESTIC_PASSWORD_FILE="$CONFIG_PASSWORD_FILE"
+    configure_restic_connection
 
     assert_restic_available
     assert_password_file_exists

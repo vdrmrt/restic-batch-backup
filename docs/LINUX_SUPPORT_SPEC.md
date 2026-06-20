@@ -66,7 +66,9 @@ Recommended structure after Linux support is added:
 ```text
 restic-batch-backup
 ├── README.md
-├── config.example.json
+├── config_examples
+│   ├── linux-sftp-test.example.json
+│   └── windows-sftp-backup.example.json
 ├── .gitignore
 ├── docs
 │   ├── INITIAL_SPEC.md
@@ -130,7 +132,7 @@ Suggested examples:
 ./runners/restic-batch-backup.sh init
 ./runners/restic-batch-backup.sh backup
 ./runners/restic-batch-backup.sh backup --dry-run
-./runners/restic-batch-backup.sh backup --config ./configs/server.json
+./runners/restic-batch-backup.sh backup --config ~/.config/restic-batch-backup/server.json
 ./runners/restic-batch-backup.sh snapshots
 ./runners/restic-batch-backup.sh status
 ./runners/restic-batch-backup.sh check
@@ -156,7 +158,7 @@ Linux support should reuse the current JSON schema.
 The Linux runner should load this by default:
 
 ```text
-./config.json
+~/.config/restic-batch-backup/config.json
 ```
 
 It should also accept a custom path through:
@@ -181,6 +183,7 @@ It should also accept a custom path through:
 - `excludeItems`
 - `logging.folder`
 - `backupTags`
+- `ssh.identityFile`
 
 ### Example Linux config
 
@@ -206,6 +209,9 @@ It should also accept a custom path through:
     },
     "restore": {
         "defaultTarget": "/tmp/restic-restore"
+    },
+    "ssh": {
+        "identityFile": "$HOME/.ssh/id_ed25519_backup_example_linux_device"
     },
     "logging": {
         "folder": "$HOME/.local/state/restic-batch-backup/logs"
@@ -233,6 +239,7 @@ The following fields should be treated as path-like values:
 - each item in `backupFolders`
 - `restore.defaultTarget`
 - `logging.folder`
+- `ssh.identityFile`
 
 The following fields should remain plain strings after environment expansion:
 
@@ -503,7 +510,7 @@ Linux support should be easy to automate.
 ### Cron example
 
 ```cron
-30 2 * * * cd /opt/restic-batch-backup && ./runners/restic-batch-backup.sh backup --config /opt/restic-batch-backup/config.json
+30 2 * * * cd /opt/restic-batch-backup && ./runners/restic-batch-backup.sh backup --config /etc/restic-batch-backup/config.json
 ```
 
 ### systemd service example
@@ -515,7 +522,7 @@ Description=Restic Batch Backup
 [Service]
 Type=oneshot
 WorkingDirectory=/opt/restic-batch-backup
-ExecStart=/opt/restic-batch-backup/runners/restic-batch-backup.sh backup --config /opt/restic-batch-backup/config.json
+ExecStart=/opt/restic-batch-backup/runners/restic-batch-backup.sh backup --config /etc/restic-batch-backup/config.json
 ```
 
 ### systemd timer example

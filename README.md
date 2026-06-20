@@ -1,103 +1,92 @@
 # Restic Batch Backup
 
-Restic Batch Backup is a small, config-driven helper for backing up a batch of configured folders with Restic.
+Restic Batch Backup is a small, config-driven wrapper around `restic` for backing up a batch of folders with a shared JSON config format.
 
-The project is still Windows-first, and now includes both a PowerShell runner for Windows and an initial Bash runner for Linux. Both runners use the same JSON config shape, while real config values remain operating-system specific.
+The project currently includes:
 
-## What It Does
+- a PowerShell runner for Windows at `runners/restic-batch-backup.ps1`
+- a Bash runner for Linux at `runners/restic-batch-backup.sh`
+- shared config examples under `config_examples/`
+- SFTP client and server setup docs under `docs/`
+- CI smoke tests and a tag-driven release workflow
 
-- Loads backup settings from `config.json`.
-- Backs up a configured batch of folders.
-- Applies configured Restic exclude rules and tags.
-- Supports `init`, `backup`, `snapshots`, `status`, `restore`, `check`, and `forget`.
-- Reports start time, end time, Restic exit code, and backup duration.
-- Keeps machine-specific config and secrets out of Git.
-- Restores configured backup folders into a chosen restore folder.
+## Features
+
+- `init`, `backup`, `snapshots`, `status`, `restore`, `check`, and `forget`
+- config-driven repository, folder, restore, retention, and tag settings
+- restore safety checks to avoid overlapping restore targets and backup folders
+- optional `ssh.identityFile` support for SFTP repositories
+- dry-run support for backup on both runners
+- restore preview mode on Linux using `restic ls`
+
+## Repo Layout
+
+```text
+restic-batch-backup
+├── config_examples/
+│   ├── linux-sftp-test.example.json
+│   └── windows-sftp-backup.example.json
+├── docs/
+│   ├── SFTP_SERVER_SETUP.md
+│   ├── SFTP_TESTING.md
+│   └── RELEASING.md
+├── runners/
+├── scripts/
+│   └── create-restic-test-data.sh
+└── tests/
+```
+
+Use `config_examples/` for committed templates. Keep live config outside the repo, preferably in your user config directory.
+
+Default live config locations:
+
+- Windows: `%APPDATA%\restic-batch-backup\config.json`
+- Linux: `${XDG_CONFIG_HOME:-$HOME/.config}/restic-batch-backup/config.json`
 
 ## Requirements
 
 Windows:
 
-- PowerShell 5.1 or newer.
-- Restic installed and available on `PATH`.
-- A reachable Restic repository.
-- A local Restic password file.
+- PowerShell 5.1 or newer
+- Restic installed and available on `PATH`
+- a reachable Restic repository
+- a local Restic password file
 
 Linux:
 
-- Bash 4.0 or newer.
-- `jq`, `realpath`, and Restic installed and available on `PATH`.
-- A reachable Restic repository.
-- A local Restic password file.
+- Bash 4.0 or newer
+- `jq`, `realpath`, and Restic installed and available on `PATH`
+- a reachable Restic repository
+- a local Restic password file
 
 ## Quick Start
 
-Copy the example config and edit it for the current machine:
+Windows example:
 
 ```powershell
-Copy-Item .\config.example.json .\config.json
-notepad .\config.json
-```
-
-Create the password file referenced by `passwordFile` in `config.json`. Do not commit this file.
-
-Run a status check:
-
-```powershell
+$ConfigDir = Join-Path $env:APPDATA 'restic-batch-backup'
+New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
+Copy-Item .\config_examples\windows-sftp-backup.example.json (Join-Path $ConfigDir 'config.json')
+notepad (Join-Path $ConfigDir 'config.json')
 .\runners\restic-batch-backup.ps1 -Action status
-```
-
-Initialize a new repository only once:
-
-```powershell
-.\runners\restic-batch-backup.ps1 -Action init
-```
-
-Run a dry backup first:
-
-```powershell
 .\runners\restic-batch-backup.ps1 -Action backup -DryRun
 ```
 
-Run the real backup:
-
-```powershell
-.\runners\restic-batch-backup.ps1 -Action backup
-```
-
-## Commands
-
-```powershell
-.\runners\restic-batch-backup.ps1 -Action init
-.\runners\restic-batch-backup.ps1 -Action backup
-.\runners\restic-batch-backup.ps1 -Action backup -DryRun
-.\runners\restic-batch-backup.ps1 -Action snapshots
-.\runners\restic-batch-backup.ps1 -Action status
-.\runners\restic-batch-backup.ps1 -Action check
-.\runners\restic-batch-backup.ps1 -Action restore -Snapshot latest
-.\runners\restic-batch-backup.ps1 -Action restore -Snapshot latest -DryRun
-.\runners\restic-batch-backup.ps1 -Action restore -Snapshot latest -RestoreTarget C:\Temp\restic-restore
-.\runners\restic-batch-backup.ps1 -Action forget
-```
-
-Use a different config file:
-
-```powershell
-.\runners\restic-batch-backup.ps1 -Action backup -ConfigPath .\configs\laptop.json
-```
-
-Linux runner examples:
+Linux example:
 
 ```bash
-./runners/restic-batch-backup.sh status --config ./config.json
-./runners/restic-batch-backup.sh backup --dry-run --config ./config.json
-./runners/restic-batch-backup.sh restore --snapshot latest --dry-run --config ./config.json
-./runners/restic-batch-backup.sh forget --config ./config.json
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/restic-batch-backup"
+mkdir -p "$CONFIG_DIR"
+cp ./config_examples/linux-sftp-test.example.json "$CONFIG_DIR/config.json"
+./runners/restic-batch-backup.sh status
+./runners/restic-batch-backup.sh backup --dry-run
 ```
+
+Create the password file referenced by `passwordFile` before running a real backup, and do not commit it.
 
 ## Configuration
 
-Real local configuration belongs in `config.json`, which is ignored by Git. The committed `config.example.json` documents the schema.
+Real local configuration belongs outside this repository. The runners default to your user config directory, and you can use `--config <path>` or `-ConfigPath <path>` for additional profiles such as test-only configs.
 
 Required fields:
 
@@ -115,42 +104,93 @@ Optional fields:
 - `excludeItems`
 - `logging.folder`
 - `backupTags`
+- `ssh.identityFile`
 
-Windows-style environment variables such as `%USERPROFILE%` are expanded by the PowerShell runner.
+For SFTP repositories, `ssh.identityFile` is optional. When set, the runners pass that key to Restic via `-o sftp.args=...`, so you can use a key from JSON instead of relying only on `~/.ssh/config`.
+
+## Common Commands
+
+PowerShell:
+
+```powershell
+.\runners\restic-batch-backup.ps1 -Action init
+.\runners\restic-batch-backup.ps1 -Action backup
+.\runners\restic-batch-backup.ps1 -Action backup -DryRun
+.\runners\restic-batch-backup.ps1 -Action snapshots
+.\runners\restic-batch-backup.ps1 -Action status
+.\runners\restic-batch-backup.ps1 -Action check
+.\runners\restic-batch-backup.ps1 -Action restore -Snapshot latest -DryRun
+.\runners\restic-batch-backup.ps1 -Action restore -Snapshot latest -RestoreTarget C:\Temp\restic-restore
+.\runners\restic-batch-backup.ps1 -Action forget
+```
+
+Bash:
+
+```bash
+./runners/restic-batch-backup.sh init
+./runners/restic-batch-backup.sh backup
+./runners/restic-batch-backup.sh backup --dry-run
+./runners/restic-batch-backup.sh snapshots
+./runners/restic-batch-backup.sh status
+./runners/restic-batch-backup.sh check
+./runners/restic-batch-backup.sh restore --snapshot latest --dry-run
+./runners/restic-batch-backup.sh restore --snapshot latest --restore-target /tmp/restic-restore
+./runners/restic-batch-backup.sh forget
+```
+
+Use `--config <path>` or `-ConfigPath <path>` to point at a non-default config file outside the repo, such as `~/.config/restic-batch-backup/sftp-test.json`.
 
 ## Restore Behavior
 
-Restore uses the configured `backupFolders` as the source list. For each configured folder, the runner converts the local Windows path to the matching Restic snapshot path and restores it into a subfolder under the restore target.
+Restore uses the configured `backupFolders` as the source list.
 
-Example: `C:\Users\Example\Documents` is restored from `/C/Users/Example/Documents` into `C:\Temp\restic-restore\Documents`.
+Windows:
 
-Use an empty restore target for normal restores. The runner refuses non-empty restore targets by default to avoid mixing old restore output with new data. For deliberate advanced restores into an existing target, pass `-AllowNonEmptyRestoreTarget`.
+- restores each configured folder into a subfolder under the restore target
+- uses the configured-folder restore flow to avoid common ancestor-folder permission issues
 
-Restic can restore full snapshots directly, but on Windows that may involve restoring metadata for ancestor folders such as `C:\Users`. Some Windows metadata and security descriptor restore operations require Administrator privileges. The runner's configured-folder restore avoids those ancestor folders for the common batch-backup restore path.
+Linux:
 
-## Scheduling
+- `restore --dry-run` is implemented as a preview mode
+- preview mode validates restore target safety, then uses `restic ls` instead of writing files
 
-After manual backup and restore testing works, use Windows Task Scheduler with:
+On both runners:
 
-```text
-Program: powershell.exe
-Arguments: -NoProfile -ExecutionPolicy Bypass -File "C:\Path\To\restic-batch-backup\runners\restic-batch-backup.ps1" -Action backup -ConfigPath "C:\Path\To\restic-batch-backup\config.json"
-Start in: C:\Path\To\restic-batch-backup
+- restore targets must not overlap configured backup folders
+- restore targets must be empty unless explicitly overridden
+
+## SFTP Workflows
+
+Client-side SFTP testing:
+
+- `docs/SFTP_TESTING.md`
+- `config_examples/linux-sftp-test.example.json`
+- `scripts/create-restic-test-data.sh`
+
+Server-side SFTP provisioning and hardening:
+
+- `docs/SFTP_SERVER_SETUP.md`
+
+The test data helper supports:
+
+```bash
+./scripts/create-restic-test-data.sh
+./scripts/create-restic-test-data.sh --target /tmp/my-restic-test
+./scripts/create-restic-test-data.sh --target /tmp/my-restic-test --mutate
 ```
 
 ## Safety
 
-- The runner never prints the Restic password.
-- Missing backup folders are skipped with warnings.
-- A backup run stops if no configured folders exist.
-- Restore targets are blocked when they overlap configured backup folders.
-- Restore targets must be empty unless `-AllowNonEmptyRestoreTarget` is passed.
-- Restic failures return non-zero exit codes.
+- the runners never print the Restic password
+- missing backup folders are skipped with warnings
+- a backup stops if no configured folders remain
+- restore targets are blocked when they overlap backup folders
+- Restic failures return non-zero exit codes
 
-## Linux Support
+## Release Management
 
-An initial Linux Bash runner is available at `runners/restic-batch-backup.sh`.
-
-Linux configs should use Linux paths and Linux-style environment variables such as `$HOME`. The detailed Linux design and behavior notes live in `docs/LINUX_SUPPORT_SPEC.md`.
-
-On Linux, `restore --dry-run` is implemented as a preview mode. The runner still validates restore target safety, but it lists the snapshot contents with `restic ls` instead of writing files because current Restic versions do not provide a native restore dry-run flag.
+- `VERSION` stores the current target release version
+- `CHANGELOG.md` tracks unreleased and released changes
+- `docs/RELEASING.md` documents the release checklist
+- GitHub Actions runs CI smoke checks for both runners
+- GitHub releases are created from `vX.Y.Z` tags when the tag matches `VERSION` and `CHANGELOG.md`

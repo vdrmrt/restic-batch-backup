@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  bash-runner:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Bash lint dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq shellcheck
+
+      - name: Bash syntax check
+        run: bash -n runners/restic-batch-backup.sh
+
+      - name: ShellCheck
+        run: shellcheck runners/restic-batch-backup.sh tests/ci/test-bash-smoke.sh
+
+      - name: Bash smoke tests
+        run: bash tests/ci/test-bash-smoke.sh
+
+  powershell-runner:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+
+      - name: PowerShell syntax check
+        shell: pwsh
+        run: |
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'runners/restic-batch-backup.ps1'),
+            [ref] $null,
+            [ref] $parseErrors
+          ) | Out-Null
+
+          if ($parseErrors.Count -gt 0) {
+            $parseErrors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path 'runners/restic-batch-backup.ps1' -Severity Error
+          if ($results) {
+            $results | Format-Table -AutoSize | Out-String | Write-Host
+            exit 1
+          }
+
+      - name: PowerShell smoke tests
+        shell: pwsh
+        run: ./tests/ci/test-powershell-smoke.ps1
